@@ -169,7 +169,7 @@ const LoanView = () => {
             row.amount ? `${Number(row.amount).toLocaleString('en-IN')}` : 'N/A',
             row.date ? new Date(row.date).toLocaleDateString('en-IN') : 'N/A',
             row.purpose || 'N/A',
-            row.fdrAmount ? `₹${Number(row.fdrAmount).toLocaleString('en-IN')}` : 'N/A',
+            row.fdrAmount ? `${Number(row.fdrAmount).toLocaleString('en-IN')}` : 'N/A',
             row.fdrScheme || 'N/A'
         ]);
 
@@ -305,10 +305,10 @@ const LoanView = () => {
             index + 1,
             row.loanType || 'N/A',
             row.membershipNumber || 'N/A',
-            row.amount ? `₹${Number(row.amount).toLocaleString('en-IN')}` : 'N/A',
+            row.amount ? `${Number(row.amount).toLocaleString('en-IN')}` : 'N/A',
             row.date ? new Date(row.date).toLocaleDateString('en-IN') : 'N/A',
             row.purpose || 'N/A',
-            row.fdrAmount ? `₹${Number(row.fdrAmount).toLocaleString('en-IN')}` : 'N/A',
+            row.fdrAmount ? `${Number(row.fdrAmount).toLocaleString('en-IN')}` : 'N/A',
             row.fdrScheme || 'N/A'
         ]);
 
