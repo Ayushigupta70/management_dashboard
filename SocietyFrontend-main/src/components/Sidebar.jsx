@@ -28,7 +28,7 @@ const Sidebar = () => {
         { label: "Guarantor", route: "/guarantor", icon: <People /> },
         { label: "Guarantor List", route: "/guarantorList", icon: <People /> },
         { label: "Notice", route: "/notice", icon: <AssessmentIcon /> },
-        { label: "Loan", route: "/loan", icon: <RealEstateAgentIcon /> }
+        { label: "Loan", route: "/view-loan", icon: <RealEstateAgentIcon /> },
     ];
 
     return (

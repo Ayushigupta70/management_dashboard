@@ -8,13 +8,24 @@ import {
     Paper,
     Divider,
     Button,
+    Alert,
+    Snackbar,
 } from "@mui/material";
 import { useNavigate } from "react-router-dom";
-
-const STORAGE_KEY = "loan_pdc_app_all";
+import { useDispatch, useSelector } from "react-redux";
+import {
+    createLoan,
+    getAllLoans,
+    getLoansByMemberId,
+    resetLoanState,
+} from "../../features/loan/loanSlice";
 
 const LoanForm = () => {
     const navigate = useNavigate();
+    const dispatch = useDispatch();
+
+    // Redux state
+    const { loans, memberLoans, loading, error, success } = useSelector((state) => state.loan);
 
     const [form, setForm] = useState({
         loanType: "",
@@ -29,20 +40,58 @@ const LoanForm = () => {
         fdrScheme: "",
     });
 
-    const [allLoans, setAllLoans] = useState({}); // object with membershipNumber as key
+    const [allLoans, setAllLoans] = useState({});
     const [selectedMember, setSelectedMember] = useState("");
+    const [snackbar, setSnackbar] = useState({ open: false, message: "", severity: "success" });
 
+    // Load all loans on component mount
     useEffect(() => {
-        const saved = localStorage.getItem(STORAGE_KEY);
-        if (saved) {
-            try {
-                const data = JSON.parse(saved);
-                setAllLoans(data);
-            } catch (e) {
-                console.error(e);
-            }
+        dispatch(getAllLoans());
+    }, [dispatch]);
+
+    // Transform Redux loans data for local storage
+    useEffect(() => {
+        if (loans && loans.length > 0) {
+            const transformedLoans = {};
+            loans.forEach(loan => {
+                transformedLoans[loan.membershipNumber] = {
+                    loan: {
+                        loanType: loan.typeOfLoan,
+                        membershipNumber: loan.membershipNumber,
+                        loanDate: loan.loanDate,
+                        loanAmount: loan.loanAmount,
+                        purpose: loan.purposeOfLoan,
+                        lafDate: loan.lafDate,
+                        fdrAmount: loan.fdrAmount,
+                        fdrScheme: loan.fdrSchema,
+                    },
+                    pdc: loan.pdcDetails || []
+                };
+            });
+            setAllLoans(transformedLoans);
+            localStorage.setItem("loan_pdc_app_all", JSON.stringify(transformedLoans));
         }
-    }, []);
+    }, [loans]);
+
+    // Handle success/error messages
+    useEffect(() => {
+        if (success) {
+            setSnackbar({
+                open: true,
+                message: "Loan created successfully!",
+                severity: "success"
+            });
+            dispatch(resetLoanState());
+        }
+
+        if (error) {
+            setSnackbar({
+                open: true,
+                message: error,
+                severity: "error"
+            });
+        }
+    }, [success, error, dispatch]);
 
     const handleChange = (e) => {
         setForm({ ...form, [e.target.name]: e.target.value });
@@ -56,17 +105,112 @@ const LoanForm = () => {
         </Grid>
     );
 
-    const handleNext = () => {
-        // Save current form to localStorage under STORAGE_KEY
-        const membership = form.membershipNumber;
-        const updatedLoans = { ...allLoans, [membership]: { loan: form, pdc: [] } };
-        localStorage.setItem(STORAGE_KEY, JSON.stringify(updatedLoans));
-        navigate("/pdc", { state: form });
+    const handleNext = async () => {
+        // Validate form based on loan type
+        if (!form.loanType) {
+            setSnackbar({
+                open: true,
+                message: "Please select loan type",
+                severity: "error"
+            });
+            return;
+        }
+
+        const membershipNumber = form.loanType === "LAF" ? form.lafMembershipNumber : form.membershipNumber;
+
+        if (!membershipNumber) {
+            const fieldName = form.loanType === "LAF" ? "LAF membership number" : "membership number";
+            setSnackbar({
+                open: true,
+                message: `Please enter ${fieldName}`,
+                severity: "error"
+            });
+            return;
+        }
+
+        try {
+            // ✅✅✅ CORRECTED: Prepare loan data WITHOUT memberId
+            const loanData = {
+                typeOfLoan: form.loanType,
+                membershipNumber: membershipNumber,
+                // ❌❌❌ NO memberId HERE!
+            };
+
+            // Add fields based on loan type
+            if (form.loanType === "Loan" || form.loanType === "LAP") {
+                if (!form.loanDate || !form.loanAmount || !form.purpose) {
+                    setSnackbar({
+                        open: true,
+                        message: "Please fill all required fields for Loan/LAP",
+                        severity: "error"
+                    });
+                    return;
+                }
+                loanData.loanDate = form.loanDate;
+                loanData.loanAmount = form.loanAmount;
+                loanData.purposeOfLoan = form.purpose;
+            }
+
+            if (form.loanType === "LAF") {
+                if (!form.lafDate || !form.lafAmount || !form.fdrAmount || !form.fdrScheme) {
+                    setSnackbar({
+                        open: true,
+                        message: "Please fill all required fields for LAF",
+                        severity: "error"
+                    });
+                    return;
+                }
+                loanData.lafDate = form.lafDate;
+                loanData.lafAmount = form.lafAmount;
+                loanData.fdrAmount = form.fdrAmount;
+                loanData.fdrSchema = form.fdrScheme;
+            }
+
+            console.log("📤 Sending to API:", loanData);
+
+            // Create loan via API
+            const result = await dispatch(createLoan(loanData)).unwrap();
+
+            // Save to local storage as backup
+            const updatedLoans = {
+                ...allLoans,
+                [membershipNumber]: {
+                    loan: form,
+                    pdc: []
+                }
+            };
+            localStorage.setItem("loan_pdc_app_all", JSON.stringify(updatedLoans));
+
+            // Navigate to PDC page with loan data
+            navigate("/pdc", {
+                state: {
+                    ...form,
+                    loanId: result._id,
+                    membershipNumber: membershipNumber
+                }
+            });
+
+        } catch (error) {
+            console.error("Failed to create loan:", error);
+        }
     };
 
     const handleView = () => {
-        if (!selectedMember) return alert("Select a member to view details.");
+        if (!selectedMember) {
+            setSnackbar({
+                open: true,
+                message: "Select a member to view details.",
+                severity: "warning"
+            });
+            return;
+        }
+
+        dispatch(getLoansByMemberId(selectedMember));
         navigate("/view-loan", { state: { membershipNumber: selectedMember } });
+    };
+
+    const handleCloseSnackbar = () => {
+        setSnackbar({ ...snackbar, open: false });
     };
 
     return (
@@ -77,9 +221,8 @@ const LoanForm = () => {
 
             <Divider sx={{ mb: 3 }} />
 
-            {/* Loan Type */}
+            {/* Loan Type and Member Selection */}
             <Box display="flex" alignItems="center" gap={4} mt={3}>
-                {/* Loan Type */}
                 <TextField
                     select
                     size="small"
@@ -88,6 +231,7 @@ const LoanForm = () => {
                     value={form.loanType}
                     onChange={handleChange}
                     sx={{ minWidth: 180 }}
+                    disabled={loading}
                 >
                     <MenuItem value="Loan">Loan</MenuItem>
                     <MenuItem value="LAF">LAF</MenuItem>
@@ -101,31 +245,69 @@ const LoanForm = () => {
                     value={selectedMember}
                     onChange={(e) => setSelectedMember(e.target.value)}
                     sx={{ minWidth: 200 }}
+                    disabled={loading}
                 >
+                    <MenuItem value="">Select Member</MenuItem>
                     {Object.keys(allLoans).map((member) => (
                         <MenuItem key={member} value={member}>{member}</MenuItem>
                     ))}
                 </TextField>
 
-                <Button variant="outlined" onClick={handleView} sx={{ height: 40 }}>
+                <Button
+                    variant="outlined"
+                    onClick={handleView}
+                    sx={{ height: 40 }}
+                    disabled={loading}
+                >
                     View
                 </Button>
             </Box>
 
-
+            {/* Rest of your form UI remains same */}
             {(form.loanType === "Loan" || form.loanType === "LAP") && (
                 <>
                     <FormRow number="1" label="Membership Number">
-                        <TextField size="small" fullWidth name="membershipNumber" value={form.membershipNumber} onChange={handleChange} />
+                        <TextField
+                            size="small"
+                            fullWidth
+                            name="membershipNumber"
+                            value={form.membershipNumber}
+                            onChange={handleChange}
+                            disabled={loading}
+                        />
                     </FormRow>
                     <FormRow number="2" label="Loan Date">
-                        <TextField type="date" size="small" fullWidth name="loanDate" value={form.loanDate} onChange={handleChange} />
+                        <TextField
+                            type="date"
+                            size="small"
+                            fullWidth
+                            name="loanDate"
+                            value={form.loanDate}
+                            onChange={handleChange}
+                            disabled={loading}
+                            InputLabelProps={{ shrink: true }}
+                        />
                     </FormRow>
                     <FormRow number="3" label="Loan Amount">
-                        <TextField type="number" size="small" fullWidth name="loanAmount" value={form.loanAmount} onChange={handleChange} />
+                        <TextField
+                            type="number"
+                            size="small"
+                            fullWidth
+                            name="loanAmount"
+                            value={form.loanAmount}
+                            onChange={handleChange}
+                            disabled={loading}
+                        />
                     </FormRow>
                     <FormRow number="4" label="Purpose">
-                        <TextField size="small" fullWidth name="purpose" value={form.purpose} onChange={handleChange} />
+                        <TextField
+                            size="small"
+                            fullWidth
+                            name="purpose"
+                            value={form.purpose}
+                            onChange={handleChange}
+                            disabled={loading}
+                        />
                     </FormRow>
                 </>
             )}
@@ -135,28 +317,83 @@ const LoanForm = () => {
                     <Typography mt={3} mb={1} fontWeight="bold">LAF DETAILS</Typography>
                     <Divider sx={{ mb: 2 }} />
                     <FormRow number="1" label="LAF Member No">
-                        <TextField size="small" fullWidth name="lafMembershipNumber" value={form.lafMembershipNumber} onChange={handleChange} />
+                        <TextField
+                            size="small"
+                            fullWidth
+                            name="lafMembershipNumber"
+                            value={form.lafMembershipNumber}
+                            onChange={handleChange}
+                            disabled={loading}
+                        />
                     </FormRow>
                     <FormRow number="2" label="LAF Date">
-                        <TextField type="date" size="small" fullWidth name="lafDate" value={form.lafDate} onChange={handleChange} />
+                        <TextField
+                            type="date"
+                            size="small"
+                            fullWidth
+                            name="lafDate"
+                            value={form.lafDate}
+                            onChange={handleChange}
+                            disabled={loading}
+                            InputLabelProps={{ shrink: true }}
+                        />
                     </FormRow>
                     <FormRow number="3" label="LAF Amount">
-                        <TextField type="number" size="small" fullWidth name="lafAmount" value={form.lafAmount} onChange={handleChange} />
+                        <TextField
+                            type="number"
+                            size="small"
+                            fullWidth
+                            name="lafAmount"
+                            value={form.lafAmount}
+                            onChange={handleChange}
+                            disabled={loading}
+                        />
                     </FormRow>
                     <FormRow number="4" label="FDR Amount">
-                        <TextField type="number" fullWidth size="small" name="fdrAmount" value={form.fdrAmount} onChange={handleChange} />
+                        <TextField
+                            type="number"
+                            fullWidth
+                            size="small"
+                            name="fdrAmount"
+                            value={form.fdrAmount}
+                            onChange={handleChange}
+                            disabled={loading}
+                        />
                     </FormRow>
                     <FormRow number="5" label="FDR Scheme">
-                        <TextField fullWidth size="small" name="fdrScheme" value={form.fdrScheme} onChange={handleChange} />
+                        <TextField
+                            fullWidth
+                            size="small"
+                            name="fdrScheme"
+                            value={form.fdrScheme}
+                            onChange={handleChange}
+                            disabled={loading}
+                        />
                     </FormRow>
-
                 </>
             )}
 
             <Box textAlign="center" mt={4} display="flex" justifyContent="center" alignItems="center" gap={2}>
-                <Button variant="contained" sx={{ px: 5, py: 1.3 }} onClick={handleNext}>Next</Button>
+                <Button
+                    variant="contained"
+                    sx={{ px: 5, py: 1.3 }}
+                    onClick={handleNext}
+                    disabled={loading}
+                >
+                    {loading ? "Processing..." : "Next"}
+                </Button>
             </Box>
 
+            <Snackbar
+                open={snackbar.open}
+                autoHideDuration={6000}
+                onClose={handleCloseSnackbar}
+                anchorOrigin={{ vertical: 'bottom', horizontal: 'center' }}
+            >
+                <Alert onClose={handleCloseSnackbar} severity={snackbar.severity} sx={{ width: '100%' }}>
+                    {snackbar.message}
+                </Alert>
+            </Snackbar>
         </Paper>
     );
 };
